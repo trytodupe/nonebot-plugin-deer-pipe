@@ -63,15 +63,15 @@ def gen_calendar(
             img.paste(ASSETS_IMG_DEERPIPE, (x0, y0))
             ASSETS_FONT.draw(drw, (x0 + 5, y0 + CELL_H - 35), str(day), fill="black")
 
-            # Skip day if not deered
-            if day not in records:
+            # Skip day if not deered or count is zero
+            if day not in records or records[day] == 0:
                 continue
 
             # Draw check
             img.paste(ASSETS_IMG_CHECK, (x0, y0), ASSETS_IMG_CHECK)
 
-            # Draw count if greater than 1
-            if records[day] > 1:
+            # Draw count text for all non-1 values (including negatives)
+            if records[day] != 1:
                 txt = "x999+" if records[day] > 999 else f"x{records[day]}"
                 tlen = ASSETS_FONT.get_width(txt, size=20)
                 ASSETS_FONT.draw(

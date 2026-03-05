@@ -198,6 +198,38 @@ async def check_in(now: datetime, user: User, day: int | None = None):
             return (True, records)
 
 
+async def check_out(now: datetime, user: User):
+    """
+    Check out (count -1)
+
+    :param now: Current time
+    :param user: User
+    :return: dict[day of month, count]
+    """
+    async with _get_session() as db:
+        # Get deer records
+        records = await _get_records(db, now, user)
+
+        # If today is checked
+        if now.day in records:
+            records[now.day] -= 1
+            await db.execute(
+                update(DeerRecord)
+                .where(col(DeerRecord.user_uuid) == user.uuid)
+                .where(col(DeerRecord.month) == now.month)
+                .where(col(DeerRecord.day) == now.day)
+                .values(count=records[now.day])
+            )
+
+        # If today is not checked
+        else:
+            records[now.day] = -1
+            db.add(DeerRecord(user_uuid=user.uuid, month=now.month, day=now.day, count=-1))
+
+        await db.commit()
+        return records
+
+
 async def get_rank(session: Session, now: datetime):
     """
     Get rank

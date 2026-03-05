@@ -1,5 +1,5 @@
 from .constants import PLUGIN_VERSION
-from .database import check_in, get_records, get_user, update_user
+from .database import check_in, check_out, get_records, get_user, update_user
 from .image import gen_calendar, gen_rank
 from .schedule import latest_version
 from .utils import get_member_info, get_member_rank, get_user_info
@@ -13,6 +13,7 @@ from typing import Literal
 
 # Matchers
 _deer = on_alconna(Alconna("🦌", Args["target?", At]), aliases={"鹿"})
+_deer_minus = on_alconna(Alconna("扣", Args["target?", At]))
 _deer_past = on_alconna(Alconna("补🦌", Args["day", int]), aliases={"补鹿"})
 _deer_calendar = on_alconna(Alconna("🦌历", Args["target?", At]), aliases={"鹿历"})
 _deer_rank = on_alconna(Alconna("🦌榜"), aliases={"鹿榜"})
@@ -72,6 +73,39 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
         )
     else:
         await UniMessage.text("成功🦌了").image(raw=img).finish(reply_to=True)
+
+
+@_deer_minus.handle()
+async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
+    now = datetime.now()
+
+    # Skip non-group scene
+    if target.available and not (session.scene.is_channel or session.scene.is_group):
+        _deer_minus.skip()
+
+    # Get user info
+    if target.available:
+        user_id = target.result.target
+        name, avatar, user = await get_member_info(session, interface, user_id)
+    else:
+        user_id = session.user.id
+        name, avatar, user = await get_user_info(session)
+
+    # Check out
+    records = await check_out(now, user)
+    img = gen_calendar(now, records, name, avatar)
+
+    # Reply
+    if target.available:
+        await (
+            UniMessage.text("成功帮")
+            .at(user_id)
+            .text("扣了")
+            .image(raw=img)
+            .finish(reply_to=True)
+        )
+    else:
+        await UniMessage.text("成功扣了").image(raw=img).finish(reply_to=True)
 
 
 @_deer_past.handle()
@@ -227,6 +261,8 @@ async def _():
         UniMessage.text(f"== 🦌管插件 v{PLUGIN_VERSION} 帮助 ==\n")
         .text("[🦌] 🦌管1次\n")
         .text("[🦌 @xxx] 帮xxx🦌管1次（仅群组）\n")
+        .text("[扣] 计数器-1\n")
+        .text("[扣 @xxx] 帮xxx扣1次（仅群组）\n")
         .text("[补🦌 x] 补🦌本月x日\n")
         .text("[🦌历] 看本月🦌日历\n")
         .text("[🦌历 @xxx] 看xxx的本月🦌日历（仅群组）\n")

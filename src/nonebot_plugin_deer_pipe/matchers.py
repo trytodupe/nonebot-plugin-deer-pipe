@@ -44,20 +44,6 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
         user_id = session.user.id
         name, avatar, user = await get_user_info(session)
 
-    # If can't be helped
-    if target.available and not user.can_be_helped:
-        await UniMessage.text("该用户不准别人帮🦌捏").finish(reply_to=True)
-
-    # If no deer
-    if (
-        (session.scene.is_channel or session.scene.is_group)
-        and user.no_deer_until is not None
-        and user.no_deer_until > now
-    ):
-        await UniMessage.text(
-            f"该用户已被禁🦌至{user.no_deer_until.isoformat()}"
-        ).finish(reply_to=True)
-
     # Check in
     _, records = await check_in(now, user)
     img = gen_calendar(now, records, name, avatar)

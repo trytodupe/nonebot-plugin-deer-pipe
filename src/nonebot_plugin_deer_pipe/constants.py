@@ -20,7 +20,7 @@ ASSETS_IMG_CHECK = Image.open(ASSETS_PATH / "check@96x100.png").convert("RGBA")
 ASSETS_IMG_DEERPIPE = Image.open(ASSETS_PATH / "deerpipe@100x82.png").convert("RGBA")
 
 # Database
-DATABASE_VERSION = 3
+DATABASE_VERSION = 4
 DATABASE_NAME = f"userdata-v{DATABASE_VERSION}.db"
 DATABASE_PATH = localstore.get_plugin_data_file(DATABASE_NAME)
 DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"

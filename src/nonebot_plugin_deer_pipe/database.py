@@ -5,10 +5,15 @@ if TYPE_CHECKING:
     from nonebot_plugin_uninfo import Session
 
 
-from .constants import DATABASE_URL
+from .constants import DATABASE_PATH, DATABASE_URL
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
+import sqlite3
+import asyncio
+from collections import defaultdict
 from sqlalchemy import select
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import Field, Index, SQLModel, col, delete, func, update
 from uuid import UUID, uuid4
@@ -17,13 +22,12 @@ from uuid import UUID, uuid4
 # ORM models
 class User(SQLModel, table=True):
     __table_args__ = (
-        Index("ix_user_id", "adapter", "scope", "scene_id", "user_id", unique=True),
+        Index("ix_user_id", "adapter", "scope", "user_id", unique=True),
     )
 
     uuid: UUID = Field(primary_key=True, default_factory=uuid4)
     adapter: str
     scope: str
-    scene_id: str
     user_id: str
     can_be_helped: bool = True
     no_deer_until: datetime | None = None
@@ -42,16 +46,117 @@ class DeerRecord(SQLModel, table=True):
 # Initialize database engin
 _engine = create_async_engine(DATABASE_URL)
 _initialized = False
+_init_lock: asyncio.Lock | None = None
+
+
+def _get_current_db_path() -> Path:
+    return Path(DATABASE_PATH)
+
+
+def _get_previous_db_path() -> Path:
+    return _get_current_db_path().with_name("userdata-v3.db")
+
+
+def _migrate_previous_database():
+    current_path = _get_current_db_path()
+    previous_path = _get_previous_db_path()
+    temp_path = current_path.with_name(f"{current_path.name}.migrating")
+
+    if current_path.exists() or not previous_path.exists():
+        return
+
+    if temp_path.exists():
+        temp_path.unlink()
+
+    # Create the new schema before copying rows.
+    sync_engine = create_engine(f"sqlite:///{temp_path}")
+    try:
+        SQLModel.metadata.create_all(sync_engine)
+    finally:
+        sync_engine.dispose()
+
+    user_rows: list[tuple[str, str, str, str]] = []
+    record_rows: list[tuple[str, int, int, int]] = []
+
+    with sqlite3.connect(previous_path) as old_db:
+        old_db.row_factory = sqlite3.Row
+        user_rows = [
+            (
+                row["uuid"],
+                row["adapter"],
+                row["scope"],
+                row["user_id"],
+            )
+            for row in old_db.execute(
+                "SELECT uuid, adapter, scope, user_id FROM user ORDER BY rowid"
+            )
+        ]
+        record_rows = [
+            (
+                row["user_uuid"],
+                row["month"],
+                row["day"],
+                row["count"],
+            )
+            for row in old_db.execute(
+                "SELECT user_uuid, month, day, count FROM deerrecord ORDER BY rowid"
+            )
+        ]
+
+    user_uuid_map: dict[str, str] = {}
+    merged_users: dict[tuple[str, str, str], str] = {}
+    merged_records: dict[tuple[str, int, int], int] = defaultdict(int)
+
+    for user_uuid, adapter, scope, user_id in user_rows:
+        key = (adapter, scope, user_id)
+        canonical_uuid = merged_users.setdefault(key, user_uuid)
+        user_uuid_map[user_uuid] = canonical_uuid
+
+    for user_uuid, month, day, count in record_rows:
+        canonical_uuid = user_uuid_map.get(user_uuid)
+        if canonical_uuid is None:
+            continue
+        merged_records[(canonical_uuid, month, day)] += count
+
+    with sqlite3.connect(temp_path) as new_db:
+        new_db.execute("PRAGMA foreign_keys = OFF")
+        for (adapter, scope, user_id), user_uuid in merged_users.items():
+            new_db.execute(
+                """
+                INSERT INTO user (
+                    uuid, adapter, scope, user_id, can_be_helped, no_deer_until
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (user_uuid, adapter, scope, user_id, 1, None),
+            )
+
+        for (user_uuid, month, day), count in merged_records.items():
+            new_db.execute(
+                """
+                INSERT INTO deerrecord (uuid, user_uuid, month, day, count)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (str(uuid4()), user_uuid, month, day, count),
+            )
+
+        new_db.commit()
+
+    temp_path.replace(current_path)
 
 
 @asynccontextmanager
 async def _get_session():
     # Initialize engine
-    global _initialized
+    global _initialized, _init_lock
+    if _init_lock is None:
+        _init_lock = asyncio.Lock()
     if not _initialized:
-        async with _engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-            _initialized = True
+        async with _init_lock:
+            if not _initialized:
+                _migrate_previous_database()
+                async with _engine.begin() as conn:
+                    await conn.run_sync(SQLModel.metadata.create_all)
+                _initialized = True
 
     # Create session
     async with AsyncSession(_engine) as session:
@@ -116,7 +221,6 @@ async def get_user(session: Session, user_id: str):
             select(User)
             .where(col(User.adapter) == session.adapter)
             .where(col(User.scope) == session.scope)
-            .where(col(User.scene_id) == session.scene.id)
             .where(col(User.user_id) == user_id)
         )
 
@@ -126,7 +230,6 @@ async def get_user(session: Session, user_id: str):
             user = User(
                 adapter=session.adapter,
                 scope=session.scope,
-                scene_id=session.scene.id,
                 user_id=user_id,
             )
             db.add(user)
@@ -230,7 +333,7 @@ async def check_out(now: datetime, user: User):
         return records
 
 
-async def get_rank(session: Session, now: datetime):
+async def get_rank(_session: Session, now: datetime):
     """
     Get rank
 
@@ -244,14 +347,8 @@ async def get_rank(session: Session, now: datetime):
             await db.execute(
                 select(func.sum(DeerRecord.count), col(User.user_id))
                 .join(User)
-                .where(
-                    col(DeerRecord.user_uuid).in_(
-                        select(col(User.uuid))
-                        .where(col(User.adapter) == session.adapter)
-                        .where(col(User.scope) == session.scope)
-                        .where(col(User.scene_id) == session.scene.id)
-                    )
-                )
+                .where(col(User.adapter) == _session.adapter)
+                .where(col(User.scope) == _session.scope)
                 .where(col(DeerRecord.month) == now.month)
                 .group_by(col(DeerRecord.user_uuid))
                 .order_by(func.sum(DeerRecord.count).desc())

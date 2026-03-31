@@ -335,26 +335,28 @@ async def check_out(now: datetime, user: User):
 
 async def get_rank(_session: Session, now: datetime):
     """
-    Get rank
+    Get top and bottom rank
 
     :param session: Uninfo session
     :param now: Current time
-    :return: list[tuple[user ID, count]]
+    :return: tuple[list[tuple[user ID, count]], list[tuple[user ID, count]]]
     """
     async with _get_session() as db:
-        # Fetch rank of top 5
+        # Fetch all rank rows for current month.
         res = (
             await db.execute(
-                select(func.sum(DeerRecord.count), col(User.user_id))
+                select(col(User.user_id), func.sum(DeerRecord.count))
                 .join(User)
                 .where(col(User.adapter) == _session.adapter)
                 .where(col(User.scope) == _session.scope)
                 .where(col(DeerRecord.month) == now.month)
                 .group_by(col(DeerRecord.user_uuid))
-                .order_by(func.sum(DeerRecord.count).desc())
-                .limit(5)
             )
         ).all()
 
-        # Return rank
-        return [(i.tuple()[1], i.tuple()[0]) for i in res]
+        # Return top and bottom 5.
+        rows = [(i.tuple()[0], i.tuple()[1]) for i in res]
+        rows.sort(key=lambda item: item[1], reverse=True)
+        top_rank = rows[:5]
+        bottom_rank = sorted(rows, key=lambda item: item[1])[:5]
+        return (top_rank, bottom_rank)

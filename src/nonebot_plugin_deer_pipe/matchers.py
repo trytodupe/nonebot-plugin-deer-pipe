@@ -153,8 +153,8 @@ async def _(session: Uninfo, interface: QryItrface):
         _deer_rank.skip()
 
     # Get image
-    rank = await get_member_rank(session, interface, now)
-    img = gen_rank(rank)
+    top_rank, bottom_rank = await get_member_rank(session, interface, now)
+    img = gen_rank(top_rank, bottom_rank)
 
     # Reply
     await UniMessage.image(raw=img).finish(reply_to=True)
@@ -252,7 +252,7 @@ async def _():
         .text("[补🦌 x] 补🦌本月x日\n")
         .text("[🦌历] 看本月🦌日历\n")
         .text("[🦌历 @xxx] 看xxx的本月🦌日历（仅群组）\n")
-        .text("[🦌榜] 看本月本群🦌排行榜（仅群组）\n")
+        .text("[🦌榜] 看本月🦌正/负榜（仅群组）\n")
         .text("[帮🦌 <on|off>] 禁止/允许别人帮🦌（仅群组）\n")
         .text("[帮🦌 <on|off> @xxx] 禁止/允许别人帮xxx🦌（仅群组管理员）\n")
         .text(

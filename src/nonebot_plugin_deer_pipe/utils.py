@@ -86,12 +86,12 @@ async def get_member_info(session: Session, interface: QryItrface, user_id: str)
 
 async def get_member_rank(session: Session, interface: QryItrface, now: datetime):
     """
-    Get rank with member info
+    Get top and bottom ranks with member info
 
     :param session: Uninfo session
     :param interface: Uninfo query interface
     :param now: Current time
-    :return: list[tuple[name, avatar, count]]
+    :return: tuple[list[tuple[name, avatar, count]], list[tuple[name, avatar, count]]]
     """
 
     async def get_info(user_id: str):
@@ -108,5 +108,8 @@ async def get_member_rank(session: Session, interface: QryItrface, now: datetime
         avatar = None if avatar_url is None else await dl_img(avatar_url)
         return (name, avatar)
 
-    rank = await get_rank(session, now)
-    return [(*(await get_info(i[0])), i[1]) for i in rank]
+    top_rank, bottom_rank = await get_rank(session, now)
+    return (
+        [(*(await get_info(i[0])), i[1]) for i in top_rank],
+        [(*(await get_info(i[0])), i[1]) for i in bottom_rank],
+    )

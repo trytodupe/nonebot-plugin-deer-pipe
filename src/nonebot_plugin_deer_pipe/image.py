@@ -96,15 +96,63 @@ def gen_calendar(
     return img_bytes.getvalue()
 
 
-def gen_rank(rank: list[tuple[str, bytes | None, int]]):
+def _draw_rank_side(
+    img: Image.Image,
+    drw: ImageDraw.ImageDraw,
+    *,
+    origin_x: int,
+    title: str,
+    rank: list[tuple[str, bytes | None, int]],
+    title_fill: str,
+):
+    title_width = ASSETS_FONT.get_width(title, size=30)
+    ASSETS_FONT.draw(
+        drw,
+        (origin_x + 225 - title_width / 2, 80),
+        title,
+        size=30,
+        fill=title_fill,
+        stroke_width=0.5,
+    )
+
+    for idx, (name, avatar, count) in enumerate(rank):
+        row_y = 130 + idx * 90
+
+        if avatar is None:
+            img.paste(ASSETS_IMG_AVATAR, (origin_x + 10, row_y))
+        else:
+            avatar_img = Image.open(BytesIO(avatar)).convert("RGBA").resize((80, 80))
+            img.paste(avatar_img, (origin_x + 10, row_y))
+
+        ASSETS_FONT.draw(
+            drw,
+            (origin_x + 100, row_y + 10),
+            f"@{name}",
+            fill="black",
+        )
+        ASSETS_FONT.draw(
+            drw,
+            (origin_x + 100, row_y + 45),
+            f"x{count}",
+            fill=title_fill,
+            stroke_width=0.5,
+        )
+
+
+def gen_rank(
+    top_rank: list[tuple[str, bytes | None, int]],
+    bottom_rank: list[tuple[str, bytes | None, int]],
+):
     """
     Generate rank image
 
-    :param rank: list[tuple[name, avatar, count]]
+    :param top_rank: Top 5 rank list
+    :param bottom_rank: Bottom 5 rank list
     :return: Image bytes
     """
     # Image size
-    IMG_W, IMG_H = 400, (len(rank) + 1) * 100
+    IMG_W = 900
+    IMG_H = max(len(top_rank), len(bottom_rank), 1) * 90 + 180
 
     # Create image
     img = Image.new("RGBA", (IMG_W, IMG_H), "white")
@@ -113,25 +161,31 @@ def gen_rank(rank: list[tuple[str, bytes | None, int]]):
     # Draw title
     tlen = ASSETS_FONT.get_width("本月Top5🦌榜", size=50)
     ASSETS_FONT.draw(
-        drw, (200 - tlen / 2, 25), "本月Top5🦌榜", size=50, fill="red", stroke_width=1
+        drw,
+        (IMG_W / 2 - tlen / 2, 25),
+        "本月Top5🦌榜",
+        size=50,
+        fill="red",
+        stroke_width=1,
     )
 
-    # Draw rank
-    for idx, (name, avatar, count) in enumerate(rank):
-        # Draw avatar
-        if avatar is None:
-            img.paste(ASSETS_IMG_AVATAR, (10, (idx + 1) * 100 + 10))
-        else:
-            avatar_img = Image.open(BytesIO(avatar)).convert("RGBA").resize((80, 80))
-            img.paste(avatar_img, (10, (idx + 1) * 100 + 10))
-
-        # Draw name
-        ASSETS_FONT.draw(drw, (100, (idx + 1) * 100 + 10), f"@{name}", fill="black")
-
-        # Draw count
-        ASSETS_FONT.draw(
-            drw, (100, (idx + 1) * 100 + 50), f"x{count}", fill="red", stroke_width=0.5
-        )
+    # Draw rank columns
+    _draw_rank_side(
+        img,
+        drw,
+        origin_x=0,
+        title="正榜 Top5",
+        rank=top_rank,
+        title_fill="red",
+    )
+    _draw_rank_side(
+        img,
+        drw,
+        origin_x=450,
+        title="负榜 Bottom5",
+        rank=bottom_rank,
+        title_fill="#1565c0",
+    )
 
     # Export image to bytes
     img_bytes = BytesIO()

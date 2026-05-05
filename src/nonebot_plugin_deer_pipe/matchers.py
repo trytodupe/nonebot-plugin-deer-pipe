@@ -2,47 +2,93 @@ from .constants import PLUGIN_VERSION
 from .database import check_in, check_out, get_records, get_user, update_user
 from .image import gen_calendar, gen_rank
 from .schedule import latest_version
-from .utils import get_member_info, get_member_rank, get_user_info
+from .utils import dl_img, get_member_info, get_member_rank, get_user_info, resolve_virtual_target
 from datetime import datetime, timedelta
-from nonebot_plugin_alconna import Alconna, Args, Match, on_alconna
-from nonebot_plugin_alconna.uniseg import At, UniMessage
+from nonebot.log import logger
+from nonebot_plugin_alconna import Alconna, Args, CommandMeta, Match, on_alconna
+from nonebot_plugin_alconna.uniseg import UniMessage
 from nonebot_plugin_uninfo import QryItrface, Uninfo
 from pytimeparse import parse
 from typing import Literal
 
 
 # Matchers
-_deer = on_alconna(Alconna("🦌", Args["target?", At]), aliases={"鹿"})
-_deer_minus = on_alconna(Alconna("扣", Args["target?", At]))
+_COMPACT_META = CommandMeta(compact=True)
+
+_deer = on_alconna(Alconna("🦌", Args["target?", str], meta=_COMPACT_META), aliases={"鹿"})
+_deer_minus = on_alconna(Alconna("扣", Args["target?", str], meta=_COMPACT_META))
 _deer_past = on_alconna(Alconna("补🦌", Args["day", int]), aliases={"补鹿"})
-_deer_calendar = on_alconna(Alconna("🦌历", Args["target?", At]), aliases={"鹿历"})
+_deer_calendar = on_alconna(
+    Alconna("🦌历", Args["target?", str], meta=_COMPACT_META), aliases={"鹿历"}
+)
 _deer_rank = on_alconna(Alconna("🦌榜"), aliases={"鹿榜"})
 _set_can_be_helped = on_alconna(
-    Alconna("帮🦌", Args["can_be_helped", Literal["on", "off"]], Args["target?", At]),
+    Alconna(
+        "帮🦌",
+        Args["can_be_helped", Literal["on", "off"]],
+        Args["target?", str],
+        meta=_COMPACT_META,
+    ),
     aliases={"帮鹿"},
 )
 _set_no_deer_until = on_alconna(
-    Alconna("禁🦌", Args["target", At], Args["duration?", str]), aliases={"禁鹿"}
+    Alconna("禁🦌", Args["target", str], Args["duration?", str], meta=_COMPACT_META),
+    aliases={"禁鹿"},
 )
 _deer_help = on_alconna(Alconna("🦌帮助"), aliases={"鹿帮助"})
+
+logger.warning("deer-pipe debug: matchers module loaded")
+
+
+async def _get_target_info(
+    session: Uninfo, interface: QryItrface, target: Match[str]
+):
+    logger.warning(
+        "deer-pipe debug: resolving target available=%s result=%r user_id=%s scene=%s",
+        target.available,
+        getattr(target, "result", None),
+        session.user.id,
+        session.scene.id,
+    )
+    if not target.available:
+        name, avatar, user = await get_user_info(session)
+        return (session.user.id, name, avatar, user)
+
+    resolved = resolve_virtual_target(target.result)
+    if resolved is None:
+        await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
+        raise RuntimeError("unreachable after finish")
+
+    user_id = str(resolved["user_id"])
+    fallback_name = str(resolved["name"] or user_id)
+    fallback_avatar_url = resolved["avatar_url"]
+    remote_user = await interface.get_user(user_id)
+    display_name = (
+        (None if remote_user is None else remote_user.nick)
+        or (None if remote_user is None else remote_user.name)
+        or fallback_name
+    )
+    avatar_url = (
+        (None if remote_user is None else remote_user.avatar)
+        or fallback_avatar_url
+    )
+    avatar = None if avatar_url is None else await dl_img(avatar_url)
+    user = await get_user(session, user_id)
+    return (user_id, display_name, avatar, user)
 
 
 # Handlers
 @_deer.handle()
-async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
+async def _(session: Uninfo, interface: QryItrface, target: Match[str]):
     now = datetime.now()
-
-    # Skip non-group scene
-    if target.available and not (session.scene.is_channel or session.scene.is_group):
-        _deer.skip()
+    logger.warning(
+        "deer-pipe debug: deer matched raw target available=%s result=%r",
+        target.available,
+        getattr(target, "result", None),
+    )
 
     # Get user info
-    if target.available:
-        user_id = target.result.target
-        name, avatar, user = await get_member_info(session, interface, user_id)
-    else:
-        user_id = session.user.id
-        name, avatar, user = await get_user_info(session)
+    user_id, name, avatar, user = await _get_target_info(session, interface, target)
 
     # Check in
     _, records = await check_in(now, user)
@@ -52,7 +98,7 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
     if target.available:
         await (
             UniMessage.text("成功帮")
-            .at(user_id)
+            .text(name)
             .text("🦌了")
             .image(raw=img)
             .finish(reply_to=True)
@@ -62,20 +108,16 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
 
 
 @_deer_minus.handle()
-async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
+async def _(session: Uninfo, interface: QryItrface, target: Match[str]):
     now = datetime.now()
-
-    # Skip non-group scene
-    if target.available and not (session.scene.is_channel or session.scene.is_group):
-        _deer_minus.skip()
+    logger.warning(
+        "deer-pipe debug: minus matched raw target available=%s result=%r",
+        target.available,
+        getattr(target, "result", None),
+    )
 
     # Get user info
-    if target.available:
-        user_id = target.result.target
-        name, avatar, user = await get_member_info(session, interface, user_id)
-    else:
-        user_id = session.user.id
-        name, avatar, user = await get_user_info(session)
+    user_id, name, avatar, user = await _get_target_info(session, interface, target)
 
     # Check out
     records = await check_out(now, user)
@@ -85,7 +127,7 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
     if target.available:
         await (
             UniMessage.text("成功帮")
-            .at(user_id)
+            .text(name)
             .text("扣了")
             .image(raw=img)
             .finish(reply_to=True)
@@ -121,20 +163,16 @@ async def _(session: Uninfo, day: Match[int]):
 
 
 @_deer_calendar.handle()
-async def _(session: Uninfo, interface: QryItrface, target: Match[At]):
+async def _(session: Uninfo, interface: QryItrface, target: Match[str]):
     now = datetime.now()
-
-    # Skip non-group scene
-    if target.available and not (session.scene.is_channel or session.scene.is_group):
-        _deer_calendar.skip()
+    logger.warning(
+        "deer-pipe debug: calendar matched raw target available=%s result=%r",
+        target.available,
+        getattr(target, "result", None),
+    )
 
     # Get user info
-    if target.available:
-        user_id = target.result.target
-        name, avatar, user = await get_member_info(session, interface, user_id)
-    else:
-        user_id = session.user.id
-        name, avatar, user = await get_user_info(session)
+    user_id, name, avatar, user = await _get_target_info(session, interface, target)
 
     # Get image
     records = await get_records(now, user)
@@ -162,7 +200,7 @@ async def _(session: Uninfo, interface: QryItrface):
 
 @_set_can_be_helped.handle()
 async def _(
-    session: Uninfo, can_be_helped: Match[Literal["on", "off"]], target: Match[At]
+    session: Uninfo, can_be_helped: Match[Literal["on", "off"]], target: Match[str]
 ):
     # Skip non-group scene
     if (
@@ -177,7 +215,16 @@ async def _(
         await UniMessage.text("权限不足").finish(reply_to=True)
 
     # Get user info
-    user_id = target.result.target if target.available else session.user.id
+    if target.available:
+        resolved = resolve_virtual_target(target.result)
+        if resolved is None:
+            await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
+            return
+        user_id = str(resolved["user_id"])
+        display_name = str(resolved["name"] or user_id)
+    else:
+        user_id = session.user.id
+        display_name = None
     user = await get_user(session, user_id)
 
     # Update user
@@ -189,7 +236,7 @@ async def _(
     if target.available:
         await (
             UniMessage.text(f"已{'允许' if allowed else '禁止'}帮")
-            .at(user_id)
+            .text(display_name or user_id)
             .text("🦌")
             .finish(reply_to=True)
         )
@@ -200,7 +247,7 @@ async def _(
 
 
 @_set_no_deer_until.handle()
-async def _(session: Uninfo, target: Match[At], duration: Match[str]):
+async def _(session: Uninfo, target: Match[str], duration: Match[str]):
     now = datetime.now()
 
     # Skip non-group scene
@@ -220,7 +267,12 @@ async def _(session: Uninfo, target: Match[At], duration: Match[str]):
         await UniMessage.text("时间段表达式解析错误").finish(reply_to=True)
 
     # Get user info
-    user_id = target.result.target
+    resolved = resolve_virtual_target(target.result)
+    if resolved is None:
+        await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
+        return
+    user_id = str(resolved["user_id"])
+    display_name = str(resolved["name"] or user_id)
     user = await get_user(session, user_id)
 
     # Update user
@@ -231,11 +283,16 @@ async def _(session: Uninfo, target: Match[At], duration: Match[str]):
 
     # Reply
     if until is None:
-        await UniMessage.text("已解禁").at(user_id).text("的🦌权").finish(reply_to=True)
+        await (
+            UniMessage.text("已解禁")
+            .text(display_name)
+            .text("的🦌权")
+            .finish(reply_to=True)
+        )
     else:
         await (
             UniMessage.text("已禁止")
-            .at(user_id)
+            .text(display_name)
             .text(f"的🦌权至{until.isoformat()}")
             .finish(reply_to=True)
         )
@@ -246,17 +303,17 @@ async def _():
     await (
         UniMessage.text(f"== 🦌管插件 v{PLUGIN_VERSION} 帮助 ==\n")
         .text("[🦌] 🦌管1次\n")
-        .text("[🦌 @xxx] 帮xxx🦌管1次（仅群组）\n")
+        .text("[🦌 <target>] 帮target🦌管1次（target 为硬编码虚空索敌字符串）\n")
         .text("[扣] 计数器-1\n")
-        .text("[扣 @xxx] 帮xxx扣1次（仅群组）\n")
+        .text("[扣 <target>] 帮target扣1次（target 为硬编码虚空索敌字符串）\n")
         .text("[补🦌 x] 补🦌本月x日\n")
         .text("[🦌历] 看本月🦌日历\n")
-        .text("[🦌历 @xxx] 看xxx的本月🦌日历（仅群组）\n")
+        .text("[🦌历 <target>] 看target的本月🦌日历（target 为硬编码虚空索敌字符串）\n")
         .text("[🦌榜] 看本月🦌正/负榜（仅群组）\n")
         .text("[帮🦌 <on|off>] 禁止/允许别人帮🦌（仅群组）\n")
-        .text("[帮🦌 <on|off> @xxx] 禁止/允许别人帮xxx🦌（仅群组管理员）\n")
+        .text("[帮🦌 <on|off> <target>] 禁止/允许别人帮target🦌（仅群组管理员）\n")
         .text(
-            "[禁🦌 @xxx [yyy]] xxx接下来一段时间yyy内禁止🦌，不提供yyy时视为解禁（仅群组管理员，yyy为pytimeparse时间段表达式）\n"
+            "[禁🦌 <target> [yyy]] target接下来一段时间yyy内禁止🦌，不提供yyy时视为解禁（仅群组管理员，yyy为pytimeparse时间段表达式）\n"
         )
         .text("[🦌帮助] 打开帮助\n\n")
         .text("* 以上命令中的“🦌”均可换成“鹿”字\n\n")

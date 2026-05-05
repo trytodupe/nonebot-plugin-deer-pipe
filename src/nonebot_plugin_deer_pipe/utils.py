@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 import asyncio
 
+from .constants import VIRTUAL_TARGETS
 from .database import get_rank, get_user
 from aiohttp import ClientSession
 from aiocache import cached as real_cached
@@ -85,6 +86,22 @@ async def get_member_info(session: Session, interface: QryItrface, user_id: str)
     avatar = None if avatar_url is None else await dl_img(avatar_url)
     user = await get_user(session, user_id)
     return (name, avatar, user)
+
+
+def resolve_virtual_target(raw_target: str) -> dict[str, str | None] | None:
+    """
+    Resolve a hardcoded target alias to QQ.
+
+    :param raw_target: Alias text from command argument
+    :return: target config dict
+    """
+    target = raw_target.strip()
+    if not target:
+        return None
+    target_config = VIRTUAL_TARGETS.get(target)
+    if target_config is None:
+        return None
+    return target_config
 
 
 async def get_member_rank(session: Session, interface: QryItrface, now: datetime):

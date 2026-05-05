@@ -24,3 +24,12 @@ DATABASE_VERSION = 4
 DATABASE_NAME = f"userdata-v{DATABASE_VERSION}.db"
 DATABASE_PATH = localstore.get_plugin_data_file(DATABASE_NAME)
 DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"
+
+# Virtual targets
+VIRTUAL_TARGETS: dict[str, dict[str, str | None]] = {
+    "ars": {
+        "user_id": "1482034807",
+        "name": "ars",
+        "avatar_url": None,
+    },
+}

@@ -2,11 +2,11 @@ from .constants import PLUGIN_VERSION
 from .database import check_in, check_out, get_records, get_user, update_user
 from .image import gen_calendar, gen_rank
 from .schedule import latest_version
-from .utils import dl_img, get_member_info, get_member_rank, get_user_info, resolve_virtual_target
+from .utils import dl_img, get_member_rank, get_user_info, resolve_virtual_target
 from datetime import datetime, timedelta
 from nonebot.log import logger
 from nonebot_plugin_alconna import Alconna, Args, CommandMeta, Match, on_alconna
-from nonebot_plugin_alconna.uniseg import UniMessage
+from nonebot_plugin_alconna.uniseg import At, UniMessage
 from nonebot_plugin_uninfo import QryItrface, Uninfo
 from pytimeparse import parse
 from typing import Literal
@@ -15,53 +15,48 @@ from typing import Literal
 # Matchers
 _COMPACT_META = CommandMeta(compact=True)
 
-_deer = on_alconna(Alconna("🦌", Args["target?", str], meta=_COMPACT_META), aliases={"鹿"})
-_deer_minus = on_alconna(Alconna("扣", Args["target?", str], meta=_COMPACT_META))
+_deer = on_alconna(Alconna("🦌", Args["target?", At | str], meta=_COMPACT_META), aliases={"鹿"})
+_deer_minus = on_alconna(Alconna("扣", Args["target?", At | str], meta=_COMPACT_META))
 _deer_past = on_alconna(Alconna("补🦌", Args["day", int]), aliases={"补鹿"})
 _deer_calendar = on_alconna(
-    Alconna("🦌历", Args["target?", str], meta=_COMPACT_META), aliases={"鹿历"}
+    Alconna("🦌历", Args["target?", At | str], meta=_COMPACT_META), aliases={"鹿历"}
 )
 _deer_rank = on_alconna(Alconna("🦌榜"), aliases={"鹿榜"})
 _set_can_be_helped = on_alconna(
     Alconna(
         "帮🦌",
         Args["can_be_helped", Literal["on", "off"]],
-        Args["target?", str],
+        Args["target?", At | str],
         meta=_COMPACT_META,
     ),
     aliases={"帮鹿"},
 )
 _set_no_deer_until = on_alconna(
-    Alconna("禁🦌", Args["target", str], Args["duration?", str], meta=_COMPACT_META),
+    Alconna("禁🦌", Args["target", At | str], Args["duration?", str], meta=_COMPACT_META),
     aliases={"禁鹿"},
 )
 _deer_help = on_alconna(Alconna("🦌帮助"), aliases={"鹿帮助"})
 
-logger.warning("deer-pipe debug: matchers module loaded")
-
-
 async def _get_target_info(
-    session: Uninfo, interface: QryItrface, target: Match[str]
+    session: Uninfo, interface: QryItrface, target: Match[At | str]
 ):
-    logger.warning(
-        "deer-pipe debug: resolving target available=%s result=%r user_id=%s scene=%s",
-        target.available,
-        getattr(target, "result", None),
-        session.user.id,
-        session.scene.id,
-    )
     if not target.available:
         name, avatar, user = await get_user_info(session)
         return (session.user.id, name, avatar, user)
 
-    resolved = resolve_virtual_target(target.result)
-    if resolved is None:
-        await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
-        raise RuntimeError("unreachable after finish")
+    if isinstance(target.result, At):
+        user_id = target.result.target
+        fallback_name = user_id
+        fallback_avatar_url = None
+    else:
+        resolved = resolve_virtual_target(target.result)
+        if resolved is None:
+            await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
+            raise RuntimeError("unreachable after finish")
+        user_id = str(resolved["user_id"])
+        fallback_name = str(resolved["name"] or user_id)
+        fallback_avatar_url = resolved["avatar_url"]
 
-    user_id = str(resolved["user_id"])
-    fallback_name = str(resolved["name"] or user_id)
-    fallback_avatar_url = resolved["avatar_url"]
     remote_user = await interface.get_user(user_id)
     display_name = (
         (None if remote_user is None else remote_user.nick)
@@ -79,13 +74,8 @@ async def _get_target_info(
 
 # Handlers
 @_deer.handle()
-async def _(session: Uninfo, interface: QryItrface, target: Match[str]):
+async def _(session: Uninfo, interface: QryItrface, target: Match[At | str]):
     now = datetime.now()
-    logger.warning(
-        "deer-pipe debug: deer matched raw target available=%s result=%r",
-        target.available,
-        getattr(target, "result", None),
-    )
 
     # Get user info
     user_id, name, avatar, user = await _get_target_info(session, interface, target)
@@ -108,13 +98,8 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[str]):
 
 
 @_deer_minus.handle()
-async def _(session: Uninfo, interface: QryItrface, target: Match[str]):
+async def _(session: Uninfo, interface: QryItrface, target: Match[At | str]):
     now = datetime.now()
-    logger.warning(
-        "deer-pipe debug: minus matched raw target available=%s result=%r",
-        target.available,
-        getattr(target, "result", None),
-    )
 
     # Get user info
     user_id, name, avatar, user = await _get_target_info(session, interface, target)
@@ -163,13 +148,8 @@ async def _(session: Uninfo, day: Match[int]):
 
 
 @_deer_calendar.handle()
-async def _(session: Uninfo, interface: QryItrface, target: Match[str]):
+async def _(session: Uninfo, interface: QryItrface, target: Match[At | str]):
     now = datetime.now()
-    logger.warning(
-        "deer-pipe debug: calendar matched raw target available=%s result=%r",
-        target.available,
-        getattr(target, "result", None),
-    )
 
     # Get user info
     user_id, name, avatar, user = await _get_target_info(session, interface, target)
@@ -200,7 +180,7 @@ async def _(session: Uninfo, interface: QryItrface):
 
 @_set_can_be_helped.handle()
 async def _(
-    session: Uninfo, can_be_helped: Match[Literal["on", "off"]], target: Match[str]
+    session: Uninfo, can_be_helped: Match[Literal["on", "off"]], target: Match[At | str]
 ):
     # Skip non-group scene
     if (
@@ -247,7 +227,7 @@ async def _(
 
 
 @_set_no_deer_until.handle()
-async def _(session: Uninfo, target: Match[str], duration: Match[str]):
+async def _(session: Uninfo, target: Match[At | str], duration: Match[str]):
     now = datetime.now()
 
     # Skip non-group scene
@@ -267,12 +247,16 @@ async def _(session: Uninfo, target: Match[str], duration: Match[str]):
         await UniMessage.text("时间段表达式解析错误").finish(reply_to=True)
 
     # Get user info
-    resolved = resolve_virtual_target(target.result)
-    if resolved is None:
-        await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
-        return
-    user_id = str(resolved["user_id"])
-    display_name = str(resolved["name"] or user_id)
+    if isinstance(target.result, At):
+        user_id = target.result.target
+        display_name = user_id
+    else:
+        resolved = resolve_virtual_target(target.result)
+        if resolved is None:
+            await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
+            return
+        user_id = str(resolved["user_id"])
+        display_name = str(resolved["name"] or user_id)
     user = await get_user(session, user_id)
 
     # Update user

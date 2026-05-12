@@ -51,8 +51,7 @@ async def _get_target_info(
     else:
         resolved = resolve_virtual_target(target.result)
         if resolved is None:
-            await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
-            raise RuntimeError("unreachable after finish")
+            return None
         user_id = str(resolved["user_id"])
         fallback_name = str(resolved["name"] or user_id)
         fallback_avatar_url = resolved["avatar_url"]
@@ -78,7 +77,10 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[At | str]):
     now = datetime.now()
 
     # Get user info
-    user_id, name, avatar, user = await _get_target_info(session, interface, target)
+    target_info = await _get_target_info(session, interface, target)
+    if target_info is None:
+        return
+    user_id, name, avatar, user = target_info
 
     # Check in
     _, records = await check_in(now, user)
@@ -102,7 +104,10 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[At | str]):
     now = datetime.now()
 
     # Get user info
-    user_id, name, avatar, user = await _get_target_info(session, interface, target)
+    target_info = await _get_target_info(session, interface, target)
+    if target_info is None:
+        return
+    user_id, name, avatar, user = target_info
 
     # Check out
     records = await check_out(now, user)
@@ -152,7 +157,10 @@ async def _(session: Uninfo, interface: QryItrface, target: Match[At | str]):
     now = datetime.now()
 
     # Get user info
-    user_id, name, avatar, user = await _get_target_info(session, interface, target)
+    target_info = await _get_target_info(session, interface, target)
+    if target_info is None:
+        return
+    user_id, name, avatar, user = target_info
 
     # Get image
     records = await get_records(now, user)
@@ -198,7 +206,6 @@ async def _(
     if target.available:
         resolved = resolve_virtual_target(target.result)
         if resolved is None:
-            await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
             return
         user_id = str(resolved["user_id"])
         display_name = str(resolved["name"] or user_id)
@@ -253,7 +260,6 @@ async def _(session: Uninfo, target: Match[At | str], duration: Match[str]):
     else:
         resolved = resolve_virtual_target(target.result)
         if resolved is None:
-            await UniMessage.text("未配置这个虚空索敌目标").finish(reply_to=True)
             return
         user_id = str(resolved["user_id"])
         display_name = str(resolved["name"] or user_id)
